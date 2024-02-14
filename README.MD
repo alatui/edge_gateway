@@ -3,8 +3,8 @@
 ## Development
 
 1. Install [goenv](https://github.com/go-nv/goenv/blob/master/INSTALL.md#homebrew-on-mac-os-x)
-2. Install Go 1.22 using goenv: `goenv install 1.22`
-3. Configure shell to use Go 1.22: `goenv shell 1.22`
+2. Install Go 1.22 using goenv: `goenv install 1.22.0`
+3. Configure shell to use Go 1.22: `goenv shell 1.22.0`
 4. Install dependencies: `go mod download`
 
 ## How it works
