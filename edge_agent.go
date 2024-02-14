@@ -45,6 +45,8 @@ func sendGetRquest(url string, requestID string, conn *websocket.Conn) {
     }
     req = req.WithContext(ctx)
 
+    log.Println("Send request to " + url)
+
     // Send the HTTP request
     resp, err := client.Do(req)
     if err != nil {
