@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
     "log"
     "net/http"
@@ -10,7 +9,6 @@ import (
     "github.com/gorilla/websocket"
 	"github.com/gorilla/mux"
 	"github.com/google/uuid"
-	"github.com/go-redis/redis/v8"
 )
 
 var (
@@ -20,7 +18,8 @@ var (
     }
     agents     = make(map[string]*websocket.Conn) // Map to track connected agents and their agentIDs
     agentMutex sync.Mutex                         // Mutex to ensure safe access to the agents map
-	redisClient = redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "", DB: 0}) // Redis client
+    responses  = make(map[string]string) // Map to track responses from agents
+    responseMutex sync.Mutex              // Mutex to ensure safe access to the responses map
 )
 
 type RequestData struct {
@@ -82,10 +81,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		key := agentID + ":" + responseData.ResponseID
-		err = redisClient.Set(context.Background(), key, responseData.Payload, 30*time.Second).Err()
-		if err != nil {
-			log.Fatal("Error setting Redis message from %s", agentID)
-		}
+        responseMutex.Lock()
+        responses[key] = responseData.Payload
+        responseMutex.Unlock()
     }
 
     // Lock mutex before accessing agents map
@@ -132,11 +130,13 @@ func tunnelHandler(w http.ResponseWriter, r *http.Request) {
 	key := agentID + ":" + requestID
 	for i := 0; i < 100; i++ { //30 seconds timeout
 		time.Sleep(300 * time.Millisecond)
-		val, err := redisClient.Get(context.Background(), key).Result()
-		if err == nil {
-			result = val
-			break
-		}
+		if val, ok := responses[key]; ok {
+            result = val
+            responseMutex.Lock()
+            delete(responses, key)
+            responseMutex.Unlock()
+            break
+        }
 	}
 
 	if result == "" {
@@ -149,8 +149,6 @@ func tunnelHandler(w http.ResponseWriter, r *http.Request) {
 
 
 func main() {
-	// Close the client connection when main returns
-	defer redisClient.Close()
 
     r := mux.NewRouter()
 
