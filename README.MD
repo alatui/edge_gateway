@@ -1,4 +1,4 @@
-# Websocket gateway
+# Edge gateway
 
 ## Development
 
@@ -16,4 +16,3 @@
 ### Flow
 
 ![Image Alt text](edge_gateway_flow.png)
-
