@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# Usage: ./call_endpoint.sh <client_id>
+# Usage: ./send_request.sh <agentID>
 
-# Check if the client ID is provided
+# Check if the agent ID is provided
 if [ $# -eq 0 ]; then
-    echo "Error: Client ID not provided."
-    echo "Usage: ./call_endpoint.sh <client_id>"
+    echo "Error: Agent ID not provided."
+    echo "Usage: ./call_endpoint.sh <agentID>"
     exit 1
 fi
 
-# Assign the client ID to a variable
-client_id="$1"
+# Assign the agent ID to a variable
+agentID="$1"
 
-# Execute the curl command with the provided client ID
+# Execute the curl command with the provided agent ID
 curl -X POST \
      -H "Content-Type: application/json" \
-     -H "X-GV-CLIENTID: $client_id" \
+     -H "AGENT-ID: $agentID" \
      -d '{"serviceName":"https://fakerapi.it","serviceEndpoint":"/api/v1/texts","httpMethod":"GET","payload": ""}' \
-     http://localhost:8080/tunnel
+     http://localhost:8080/gateway
 

@@ -18,8 +18,8 @@ var (
         ReadBufferSize:  1024,
         WriteBufferSize: 1024,
     }
-    clients     = make(map[string]*websocket.Conn) // Map to track connected clients and their clientIDs
-    clientMutex sync.Mutex                         // Mutex to ensure safe access to the clients map
+    agents     = make(map[string]*websocket.Conn) // Map to track connected agents and their agentIDs
+    agentMutex sync.Mutex                         // Mutex to ensure safe access to the agents map
 	redisClient = redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "", DB: 0}) // Redis client
 )
 
@@ -32,7 +32,7 @@ type RequestData struct {
 
 type Message struct {
     RequestID     	string  `json:"requestID"`
-    ClientID 	string  `json:"clientID"`
+    AgentID 	string  `json:"agentID"`
     RequestData	RequestData  `json:"requestData"`
 }
 
@@ -42,9 +42,9 @@ type ResponseData struct {
 }
 
 func websocketHandler(w http.ResponseWriter, r *http.Request) {
-    clientID := r.Header.Get("X-GV-CLIENTID") // Extract clientID from request headers
-    if clientID == "" {
-        http.Error(w, "X-GV-CLIENTID not provided", http.StatusBadRequest)
+    agentID := r.Header.Get("AGENT-ID") // Extract agentID from request headers
+    if agentID == "" {
+        http.Error(w, "AGENT-ID not provided", http.StatusBadRequest)
         return
     }
 
@@ -56,39 +56,48 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
     }
     defer conn.Close()
 
-    // Lock mutex before accessing clients map
-    clientMutex.Lock()
-    clients[clientID] = conn
-    clientMutex.Unlock()
+    // Lock mutex before accessing agents map
+    agentMutex.Lock()
+    agents[agentID] = conn
+    agentMutex.Unlock()
 
     // Infinite loop to handle WebSocket messages
     for {
-        // Read message from client
-        var m ResponseData
-
-		// Read the JSON message from the WebSocket connection
-		err := conn.ReadJSON(&m)
+        // Read message from agent
+		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Fatal("Error reading JSON message:", err)
+			log.Println("read:", err)
+			return
 		}
 
-		key := clientID + ":" + m.ResponseID
-		err = redisClient.Set(context.Background(), key, m.Payload, 30*time.Second).Err()
+		if messageType != websocket.TextMessage {
+			return
+		}
+
+		var responseData ResponseData
+		err = json.Unmarshal(message, &responseData)
 		if err != nil {
-			log.Fatal("Error setting Redis message from %s", clientID)
+			log.Println("Failed to decode responseData JSON")
+			return
+		}
+
+		key := agentID + ":" + responseData.ResponseID
+		err = redisClient.Set(context.Background(), key, responseData.Payload, 30*time.Second).Err()
+		if err != nil {
+			log.Fatal("Error setting Redis message from %s", agentID)
 		}
     }
 
-    // Lock mutex before accessing clients map
-    clientMutex.Lock()
-    delete(clients, clientID) // Remove client from map when connection closes
-    clientMutex.Unlock()
+    // Lock mutex before accessing agents map
+    agentMutex.Lock()
+    delete(agents, agentID) // Remove agent from map when connection closes
+    agentMutex.Unlock()
 }
 
 func tunnelHandler(w http.ResponseWriter, r *http.Request) {
-    clientID := r.Header.Get("X-GV-CLIENTID")
-	if clientID == "" {
-        http.Error(w, "X-GV-CLIENTID not provided", http.StatusBadRequest)
+    agentID := r.Header.Get("AGENT-ID")
+	if agentID == "" {
+        http.Error(w, "AGENT-ID not provided", http.StatusBadRequest)
         return
     }
 
@@ -100,27 +109,27 @@ func tunnelHandler(w http.ResponseWriter, r *http.Request) {
     }
 
 	requestID := uuid.NewString()
-	message := Message{requestID, clientID, requestData}
+	message := Message{requestID, agentID, requestData}
 
-    // Retrieve the WebSocket connection for the clientID
-    clientMutex.Lock()
-    conn, ok := clients[clientID]
-    clientMutex.Unlock()
+    // Retrieve the WebSocket connection for the agentID
+    agentMutex.Lock()
+    conn, ok := agents[agentID]
+    agentMutex.Unlock()
 
     if !ok {
-        http.Error(w, "clientID not found", http.StatusNotFound)
+        http.Error(w, "agentID not found", http.StatusNotFound)
         return
     }
 
 	err = conn.WriteJSON(message)
     if err != nil {
-        log.Println("Error sending message to client:", err)
-        http.Error(w, "Failed to send message to client", http.StatusInternalServerError)
+        log.Println("Error sending message to agent:", err)
+        http.Error(w, "Failed to send message to agent", http.StatusInternalServerError)
         return
     }
 
 	result := ""
-	key := clientID + ":" + requestID
+	key := agentID + ":" + requestID
 	for i := 0; i < 100; i++ { //30 seconds timeout
 		time.Sleep(300 * time.Millisecond)
 		val, err := redisClient.Get(context.Background(), key).Result()
@@ -148,8 +157,8 @@ func main() {
     // WebSocket handler
     r.HandleFunc("/ws", websocketHandler)
 
-    // HTTP GET endpoint for updating clients
-    r.HandleFunc("/tunnel", tunnelHandler).Methods("POST")
+    // HTTP GET endpoint for updating agents
+    r.HandleFunc("/gateway", tunnelHandler).Methods("POST")
 
     // Set up HTTP server with the router
     http.Handle("/", r)

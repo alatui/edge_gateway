@@ -2,6 +2,7 @@ package main
 
 import (
     "context"
+    "encoding/json"
     "flag"
     "log"
     "io/ioutil"
@@ -23,7 +24,7 @@ type RequestData struct {
 
 type Message struct {
     RequestID     	string  `json:"requestID"`
-    ClientID 	string  `json:"clientID"`
+    AgentID 	string  `json:"agentID"`
     RequestData	RequestData  `json:"requestData"`
 }
 
@@ -39,7 +40,7 @@ func sendGetRquest(url string, requestID string, conn *websocket.Conn) {
     client := &http.Client{}
     req, err := http.NewRequest(http.MethodGet, url, nil)
     if err != nil {
-        log.Fatal("Error creating request:", err)
+        log.Println("Error creating request:", err)
         return
     }
     req = req.WithContext(ctx)
@@ -49,9 +50,9 @@ func sendGetRquest(url string, requestID string, conn *websocket.Conn) {
     if err != nil {
         // Check if the error is due to a timeout
         if ctx.Err() == context.DeadlineExceeded {
-            log.Fatal("Request timed out")
+            log.Println("Request timed out")
         } else {
-            log.Fatal("Error sending request:", err)
+            log.Println("Error sending request:", err)
         }
         return
     }
@@ -60,21 +61,21 @@ func sendGetRquest(url string, requestID string, conn *websocket.Conn) {
     // Read the response body into a byte slice
     bodyBytes, err := ioutil.ReadAll(resp.Body)
     if err != nil {
-        log.Fatal("Error reading response body:", err)
+        log.Println("Error reading response body:", err)
         return
     }
 
     err = conn.WriteJSON(ResponseData{requestID, string(bodyBytes)})
     if err != nil {
-        log.Fatal("write:", err)
+        log.Println("write:", err)
         return
     }
 }
 
-func connectToWebSocket(clientID string) {
+func connectToWebSocket(agentID string) {
     // Connect to WebSocket server
     header := http.Header{}
-    header.Set("X-GV-CLIENTID", clientID) // Set clientID header
+    header.Set("AGENT-ID", agentID) // Set agentID header
     c, _, err := websocket.DefaultDialer.Dial("ws://localhost:8080/ws", header)
     if err != nil {
         log.Fatal("dial:", err)
@@ -87,16 +88,28 @@ func connectToWebSocket(clientID string) {
     go func() {
         defer close(done)
         for {
-            var m Message
-            err := c.ReadJSON(&m)
+
+            // Read message from client
+            messageType, message, err := c.ReadMessage()
             if err != nil {
-                log.Fatal("Error reading Message from server:", err)
+                log.Println("read:", err)
+                return
+            }
+
+            if messageType != websocket.TextMessage {
+                return
+            }
+
+            var m Message
+            err = json.Unmarshal(message, &m)
+            if err != nil {
+                log.Println("Failed to decode Message JSON")
                 return
             }
 
             endpoint, err := url.JoinPath(m.RequestData.ServiceName, m.RequestData.ServiceEndpoint)
             if err != nil {
-                log.Fatal(err)
+                log.Println(err)
             }
 
             if m.RequestData.HTTPMethod == "GET" {
@@ -129,13 +142,13 @@ func connectToWebSocket(clientID string) {
 }
 
 func main() {
-    clientID := flag.String("client", "", "Client ID")
+    agentID := flag.String("id", "", "Agent ID")
     flag.Parse()
 
-    if *clientID == "" {
-        log.Fatal("Client ID not provided")
+    if *agentID == "" {
+        log.Fatal("Agent ID not provided")
     }
 
-    log.Println("Connecting to WebSocket server with clientID:", *clientID)
-    connectToWebSocket(*clientID)
+    log.Println("Connecting to WebSocket server with agentID:", *agentID)
+    connectToWebSocket(*agentID)
 }
